@@ -123,6 +123,9 @@ public:
 	// This has to happen *after* the main scene is drawn.
 	// Warning: This clears the Z buffer.
 	void drawWieldedTool();
+	
+	void setZooming(s32 button);
+	s32 getZooming();
 
 private:
 	// Scene manager and nodes

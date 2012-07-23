@@ -69,7 +69,9 @@ Camera::Camera(scene::ISceneManager* smgr, MapDrawControl& draw_control,
 	m_view_bobbing_speed(0),
 
 	m_digging_anim(0),
-	m_digging_button(-1)
+	m_digging_button(-1),
+	
+	m_zooming(0)
 {
 	//dstream<<__FUNCTION_NAME<<std::endl;
 
@@ -379,6 +381,11 @@ void Camera::update(LocalPlayer* player, f32 frametime, v2u32 screensize,
 		// Stop animation
 		m_view_bobbing_state = 2;
 		m_view_bobbing_speed = 60;
+	}
+	if (m_zooming)
+	{
+		f32 zoomFOV = m_fov_y / 2; // divide more to zoom even more
+		m_cameranode->setFOV(zoomFOV);
 	}
 }
 

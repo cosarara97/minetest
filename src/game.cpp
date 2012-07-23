@@ -1725,6 +1725,32 @@ void the_game(
 			statustext_time = 0;
 		}
 		
+		else if(input->wasKeyDown("KEY_KEY_Y"))
+		{
+			camera.setZooming(1);
+		}
+		
+		else if(input->wasKeyDown("KEY_KEY_U"))
+		{
+			camera.setZooming(0);
+		}
+		
+		if(camera.getZooming() == 1)
+		{
+			video::ITexture *eyehole_texture =
+				gamedef->getTextureSource()->getTextureRaw("eyehole.png");
+			if(eyehole_texture)
+			{
+				const video::SColor color(255,255,255,255);
+				const video::SColor colors[] = {color,color,color,color};
+				core::rect<s32> rect(0,0,500,500);
+				driver->draw2DImage(eyehole_texture, rect,
+									core::rect<s32>(core::position2d<s32>(0,0),
+									core::dimension2di(eyehole_texture->getOriginalSize())),
+									NULL, colors, true);
+			}
+		}
+		
 		// Handle QuicktuneShortcutter
 		if(input->wasKeyDown(getKeySetting("keymap_quicktune_next")))
 			quicktune.next();
