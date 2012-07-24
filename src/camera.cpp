@@ -533,6 +533,16 @@ void Camera::setDigging(s32 button)
 		m_digging_button = button;
 }
 
+void Camera::setZooming(s32 button)
+{
+	m_zooming = button;
+}
+
+s32 Camera::getZooming()
+{
+	return m_zooming;
+}
+
 void Camera::wield(const ItemStack &item)
 {
 	IItemDefManager *idef = m_gamedef->idef();

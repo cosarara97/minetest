@@ -322,6 +322,49 @@ void draw_hotbar(video::IVideoDriver *driver, gui::IGUIFont *font,
 	}
 }
 
+//Camera camera(smgr, draw_control, gamedef);
+/*
+		draw_eyehole(driver, font, gamedef, camera,
+					v2s32(displaycenter.X, screensize.Y));
+*/
+void draw_eyehole(video::IVideoDriver *driver, gui::IGUIFont *font,
+		IGameDef *gamedef, bool zooming,
+		v2s32 screensize)
+{
+	if(zooming)
+	{
+		video::ITexture *eyehole_texture =
+			gamedef->getTextureSource()->
+						getTextureRaw("eyehole.png");
+		if(eyehole_texture)
+		{
+			const video::SColor color(255,255,255,255);
+			const video::SColor colors[] = {color,color,
+							color,color};
+			core::rect<s32> rect(0,0,screensize.X,screensize.Y);
+			driver->draw2DImage(eyehole_texture, rect,
+				core::rect<s32>(core::position2d<s32>(0,0),
+				core::dimension2di(eyehole_texture->
+					getOriginalSize())),
+				NULL, colors, true);
+			/*gui::IGUIStaticText *guitext = guienv->
+					addStaticText(L"This is loading",
+					core::rect<s32>(50, 50, 100,
+					(font->
+				getDimension(L"Random test string").Height
+				+ 50)), false, false);*/
+		}
+		/*else
+		{
+		gui::IGUIStaticText *guitext = guienv->
+			addStaticText(L"This is not loading",
+			core::rect<s32>(50, 50, 100,
+			(font->getDimension(L"Random test string").Height
+			+ 50)),false, false);
+		}*/
+	}
+}
+
 /*
 	Check if a node is pointable
 */
@@ -1735,22 +1778,6 @@ void the_game(
 			camera.setZooming(0);
 		}
 		
-		if(camera.getZooming() == 1)
-		{
-			video::ITexture *eyehole_texture =
-				gamedef->getTextureSource()->getTextureRaw("eyehole.png");
-			if(eyehole_texture)
-			{
-				const video::SColor color(255,255,255,255);
-				const video::SColor colors[] = {color,color,color,color};
-				core::rect<s32> rect(0,0,500,500);
-				driver->draw2DImage(eyehole_texture, rect,
-									core::rect<s32>(core::position2d<s32>(0,0),
-									core::dimension2di(eyehole_texture->getOriginalSize())),
-									NULL, colors, true);
-			}
-		}
-		
 		// Handle QuicktuneShortcutter
 		if(input->wasKeyDown(getKeySetting("keymap_quicktune_next")))
 			quicktune.next();
@@ -2747,6 +2774,8 @@ void the_game(
 		
 		//timer9.stop();
 		//TimeTaker //timer10("//timer10");
+		draw_eyehole(driver, font, gamedef, camera.getZooming(),
+					v2s32(screensize.X, screensize.Y));
 		
 		video::SMaterial m;
 		//m.Thickness = 10;

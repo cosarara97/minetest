@@ -176,6 +176,8 @@ private:
 	// If 0, left-click digging animation
 	// If 1, right-click digging animation
 	s32 m_digging_button;
+	
+	s32 m_zooming;
 };
 
 #endif
