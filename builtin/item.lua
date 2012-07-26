@@ -273,25 +273,23 @@ function minetest.node_dig(pos, node, digger)
 	minetest.log('action', digger:get_player_name() .. " digs "
 		.. node.name .. " at " .. minetest.pos_to_string(pos))
 
-	if not minetest.setting_getbool("creative_mode") then
-		local wielded = digger:get_wielded_item()
-		local drops = minetest.get_node_drops(node.name, wielded:get_name())
+	local wielded = digger:get_wielded_item()
+	local drops = minetest.get_node_drops(node.name, wielded:get_name())
 
-		-- Wear out tool
-		local tp = wielded:get_tool_capabilities()
-		local dp = minetest.get_dig_params(def.groups, tp)
-		wielded:add_wear(dp.wear)
-		digger:set_wielded_item(wielded)
+	-- Wear out tool
+	local tp = wielded:get_tool_capabilities()
+	local dp = minetest.get_dig_params(def.groups, tp)
+	wielded:add_wear(dp.wear)
+	digger:set_wielded_item(wielded)
 
-		-- Add dropped items to object's inventory
-		if digger:get_inventory() then
-			local _, dropped_item
-			for _, dropped_item in ipairs(drops) do
-				digger:get_inventory():add_item("main", dropped_item)
-			end
+	-- Add dropped items to object's inventory
+	if digger:get_inventory() then
+		local _, dropped_item
+		for _, dropped_item in ipairs(drops) do
+			digger:get_inventory():add_item("main", dropped_item)
 		end
 	end
-	
+
 	local oldmetadata = nil
 	if def.after_dig_node then
 		oldmetadata = minetest.env:get_meta(pos):to_table()
@@ -316,41 +314,6 @@ function minetest.node_dig(pos, node, digger)
 		local node_copy = {name=node.name, param1=node.param1, param2=node.param2}
 		callback(pos_copy, node_copy, digger)
 	end
-end
-
-function minetest.node_metadata_inventory_move_allow_all(pos, from_list,
-		from_index, to_list, to_index, count, player)
-	minetest.log("verbose", "node_metadata_inventory_move_allow_all")
-	local meta = minetest.env:get_meta(pos)
-	local inv = meta:get_inventory()
-
-	local from_stack = inv:get_stack(from_list, from_index)
-	local taken_items = from_stack:take_item(count)
-	inv:set_stack(from_list, from_index, from_stack)
-
-	local to_stack = inv:get_stack(to_list, to_index)
-	to_stack:add_item(taken_items)
-	inv:set_stack(to_list, to_index, to_stack)
-end
-
-function minetest.node_metadata_inventory_offer_allow_all(pos, listname, index, stack, player)
-	minetest.log("verbose", "node_metadata_inventory_offer_allow_all")
-	local meta = minetest.env:get_meta(pos)
-	local inv = meta:get_inventory()
-	local the_stack = inv:get_stack(listname, index)
-	the_stack:add_item(stack)
-	inv:set_stack(listname, index, the_stack)
-	return ItemStack("")
-end
-
-function minetest.node_metadata_inventory_take_allow_all(pos, listname, index, count, player)
-	minetest.log("verbose", "node_metadata_inventory_take_allow_all")
-	local meta = minetest.env:get_meta(pos)
-	local inv = meta:get_inventory()
-	local the_stack = inv:get_stack(listname, index)
-	local taken_items = the_stack:take_item(count)
-	inv:set_stack(listname, index, the_stack)
-	return taken_items
 end
 
 -- This is used to allow mods to redefine minetest.item_place and so on
