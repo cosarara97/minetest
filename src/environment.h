@@ -33,11 +33,12 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include <set>
 #include "irrlichttypes_extrabloated.h"
 #include "player.h"
-#include "map.h"
 #include <ostream>
 #include "activeobject.h"
 #include "util/container.h"
 #include "util/numeric.h"
+#include "mapnode.h"
+#include "mapblock.h"
 
 class Server;
 class ServerEnvironment;
@@ -46,6 +47,8 @@ class ServerActiveObject;
 typedef struct lua_State lua_State;
 class ITextureSource;
 class IGameDef;
+class Map;
+class ServerMap;
 class ClientMap;
 
 class Environment
@@ -191,11 +194,9 @@ public:
 			IBackgroundBlockEmerger *emerger);
 	~ServerEnvironment();
 
-	Map & getMap()
-		{ return *m_map; }
+	Map & getMap();
 
-	ServerMap & getServerMap()
-		{ return *m_map; }
+	ServerMap & getServerMap();
 
 	lua_State* getLua()
 		{ return m_lua; }
@@ -311,7 +312,7 @@ private:
 		Returns the id of the object.
 		Returns 0 if not added and thus deleted.
 	*/
-	u16 addActiveObjectRaw(ServerActiveObject *object, bool set_changed);
+	u16 addActiveObjectRaw(ServerActiveObject *object, bool set_changed, u32 dtime_s);
 	
 	/*
 		Remove all objects that satisfy (m_removed && m_known_by_count==0)
@@ -321,7 +322,7 @@ private:
 	/*
 		Convert stored objects from block to active
 	*/
-	void activateObjects(MapBlock *block);
+	void activateObjects(MapBlock *block, u32 dtime_s);
 	
 	/*
 		Convert objects that are not in active blocks to static.
@@ -359,6 +360,7 @@ private:
 	IntervalLimiter m_active_blocks_management_interval;
 	IntervalLimiter m_active_block_modifier_interval;
 	IntervalLimiter m_active_blocks_nodemetadata_interval;
+	int m_active_block_interval_overload_skip;
 	// Time from the beginning of the game in seconds.
 	// Incremented in step().
 	u32 m_game_time;

@@ -25,6 +25,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "main.h"  // for g_settings
 #include "settings.h"
 #include "craftdef.h"
+#include "rollback_interface.h"
 
 #define PP(x) "("<<(x).X<<","<<(x).Y<<","<<(x).Z<<")"
 
@@ -200,6 +201,14 @@ void IMoveAction::apply(InventoryManager *mgr, ServerActiveObject *player, IGame
 	}
 
 	/*
+		Do not handle rollback if both inventories are that of the same player
+	*/
+	bool ignore_rollback = (
+		from_inv.type == InventoryLocation::PLAYER &&
+		to_inv.type == InventoryLocation::PLAYER &&
+		from_inv.name == to_inv.name);
+
+	/*
 		Collect information of endpoints
 	*/
 
@@ -323,6 +332,18 @@ void IMoveAction::apply(InventoryManager *mgr, ServerActiveObject *player, IGame
 
 	// If source is infinite, reset it's stack
 	if(src_can_take_count == -1){
+		// If destination stack is of different type and there are leftover
+		// items, attempt to put the leftover items to a different place in the
+		// destination inventory.
+		// The client-side GUI will try to guess if this happens.
+		if(from_stack_was.name != to_stack_was.name){
+			for(u32 i=0; i<list_to->getSize(); i++){
+				if(list_to->getItem(i).empty()){
+					list_to->changeItem(i, to_stack_was);
+					break;
+				}
+			}
+		}
 		list_from->deleteItem(from_i);
 		list_from->addItem(from_i, from_stack_was);
 	}
@@ -330,6 +351,8 @@ void IMoveAction::apply(InventoryManager *mgr, ServerActiveObject *player, IGame
 	if(dst_can_put_count == -1){
 		list_to->deleteItem(to_i);
 		list_to->addItem(to_i, to_stack_was);
+		list_from->deleteItem(from_i);
+		list_from->addItem(from_i, from_stack_was);
 		list_from->takeItem(from_i, count);
 	}
 
@@ -342,6 +365,41 @@ void IMoveAction::apply(InventoryManager *mgr, ServerActiveObject *player, IGame
 			<<" list=\""<<to_list<<"\""
 			<<" i="<<to_i
 			<<std::endl;
+
+	/*
+		Record rollback information
+	*/
+	if(!ignore_rollback && gamedef->rollback())
+	{
+		IRollbackReportSink *rollback = gamedef->rollback();
+
+		// If source is not infinite, record item take
+		if(src_can_take_count != -1){
+			RollbackAction action;
+			std::string loc;
+			{
+				std::ostringstream os(std::ios::binary);
+				from_inv.serialize(os);
+				loc = os.str();
+			}
+			action.setModifyInventoryStack(loc, from_list, from_i, false,
+					src_item.getItemString());
+			rollback->reportAction(action);
+		}
+		// If destination is not infinite, record item put
+		if(dst_can_put_count != -1){
+			RollbackAction action;
+			std::string loc;
+			{
+				std::ostringstream os(std::ios::binary);
+				to_inv.serialize(os);
+				loc = os.str();
+			}
+			action.setModifyInventoryStack(loc, to_list, to_i, true,
+					src_item.getItemString());
+			rollback->reportAction(action);
+		}
+	}
 
 	/*
 		Report move to endpoints
@@ -405,7 +463,7 @@ void IMoveAction::apply(InventoryManager *mgr, ServerActiveObject *player, IGame
 					L, from_inv.p, from_list, from_i, src_item, player);
 		}
 	}
-
+	
 	mgr->setInventoryModified(from_inv);
 	if(inv_from != inv_to)
 		mgr->setInventoryModified(to_inv);
@@ -489,6 +547,11 @@ void IDropAction::apply(InventoryManager *mgr, ServerActiveObject *player, IGame
 	}
 
 	/*
+		Do not handle rollback if inventory is player's
+	*/
+	bool ignore_src_rollback = (from_inv.type == InventoryLocation::PLAYER);
+
+	/*
 		Collect information of endpoints
 	*/
 
@@ -526,6 +589,7 @@ void IDropAction::apply(InventoryManager *mgr, ServerActiveObject *player, IGame
 
 	// Drop the item
 	ItemStack item1 = list_from->getItem(from_i);
+	item1.count = take_count;
 	if(scriptapi_item_on_drop(player->getEnv()->getLua(), item1, player,
 				player->getBasePosition() + v3f(0,1,0)))
 	{
@@ -574,6 +638,28 @@ void IDropAction::apply(InventoryManager *mgr, ServerActiveObject *player, IGame
 		lua_State *L = player->getEnv()->getLua();
 		scriptapi_nodemeta_inventory_on_take(
 				L, from_inv.p, from_list, from_i, src_item, player);
+	}
+
+	/*
+		Record rollback information
+	*/
+	if(!ignore_src_rollback && gamedef->rollback())
+	{
+		IRollbackReportSink *rollback = gamedef->rollback();
+
+		// If source is not infinite, record item take
+		if(src_can_take_count != -1){
+			RollbackAction action;
+			std::string loc;
+			{
+				std::ostringstream os(std::ios::binary);
+				from_inv.serialize(os);
+				loc = os.str();
+			}
+			action.setModifyInventoryStack(loc, from_list, from_i,
+					false, src_item.getItemString());
+			rollback->reportAction(action);
+		}
 	}
 }
 
@@ -697,18 +783,16 @@ bool getCraftingResult(Inventory *inv, ItemStack& result,
 	
 	result.clear();
 
-	// TODO: Allow different sizes of crafting grids
-
 	// Get the InventoryList in which we will operate
 	InventoryList *clist = inv->getList("craft");
-	if(!clist || clist->getSize() != 9)
+	if(!clist)
 		return false;
 
 	// Mangle crafting grid to an another format
 	CraftInput ci;
 	ci.method = CRAFT_METHOD_NORMAL;
-	ci.width = 3;
-	for(u16 i=0; i<9; i++)
+	ci.width = clist->getWidth() ? clist->getWidth() : 3;
+	for(u16 i=0; i<clist->getSize(); i++)
 		ci.items.push_back(clist->getItem(i));
 
 	// Find out what is crafted and add it to result item slot
@@ -721,7 +805,7 @@ bool getCraftingResult(Inventory *inv, ItemStack& result,
 	if(found && decrementInput)
 	{
 		// CraftInput has been changed, apply changes in clist
-		for(u16 i=0; i<9; i++)
+		for(u16 i=0; i<clist->getSize(); i++)
 		{
 			clist->changeItem(i, ci.items[i]);
 		}

@@ -42,6 +42,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "localplayer.h"
 #endif
 #include "daynightratio.h"
+#include "map.h"
 
 #define PP(x) "("<<(x).X<<","<<(x).Y<<","<<(x).Z<<")"
 
@@ -325,6 +326,7 @@ ServerEnvironment::ServerEnvironment(ServerMap *map, lua_State *L,
 	m_emerger(emerger),
 	m_random_spawn_timer(3),
 	m_send_recommended_timer(0),
+	m_active_block_interval_overload_skip(0),
 	m_game_time(0),
 	m_game_time_fraction_counter(0)
 {
@@ -348,6 +350,17 @@ ServerEnvironment::~ServerEnvironment()
 		delete i->abm;
 	}
 }
+
+Map & ServerEnvironment::getMap()
+{
+	return *m_map;
+}
+
+ServerMap & ServerEnvironment::getServerMap()
+{
+	return *m_map;
+}
+
 
 void ServerEnvironment::serializePlayers(const std::string &savedir)
 {
@@ -730,19 +743,25 @@ neighbor_found:
 				u32 active_object_count = block->m_static_objects.m_active.size();
 				// Find out how many objects this and all the neighbors contain
 				u32 active_object_count_wider = 0;
+				u32 wider_unknown_count = 0;
 				for(s16 x=-1; x<=1; x++)
 				for(s16 y=-1; y<=1; y++)
 				for(s16 z=-1; z<=1; z++)
 				{
 					MapBlock *block2 = map->getBlockNoCreateNoEx(
 							block->getPos() + v3s16(x,y,z));
-					if(block2==NULL)
+					if(block2==NULL){
+						wider_unknown_count = 0;
 						continue;
+					}
 					active_object_count_wider +=
 							block2->m_static_objects.m_active.size()
 							+ block2->m_static_objects.m_stored.size();
 				}
-
+				// Extrapolate
+				u32 wider_known_count = 3*3*3 - wider_unknown_count;
+				active_object_count_wider += wider_unknown_count * active_object_count_wider / wider_known_count;
+				
 				// Call all the trigger variations
 				i->abm->trigger(m_env, p, n);
 				i->abm->trigger(m_env, p, n,
@@ -771,7 +790,7 @@ void ServerEnvironment::activateBlock(MapBlock *block, u32 additional_dtime)
 			<<dtime_s<<" seconds old."<<std::endl;*/
 	
 	// Activate stored objects
-	activateObjects(block);
+	activateObjects(block, dtime_s);
 
 	// Run node timers
 	std::map<v3s16, NodeTimer> elapsed_timers =
@@ -1074,7 +1093,8 @@ void ServerEnvironment::step(float dtime)
 						i = elapsed_timers.begin();
 						i != elapsed_timers.end(); i++){
 					n = block->getNodeNoEx(i->first);
-					if(scriptapi_node_on_timer(m_lua,i->first,n,i->second.elapsed))
+					p = i->first + block->getPosRelative();
+					if(scriptapi_node_on_timer(m_lua,p,n,i->second.elapsed))
 						block->setNodeTimer(i->first,NodeTimer(i->second.timeout,0));
 				}
 			}
@@ -1083,7 +1103,12 @@ void ServerEnvironment::step(float dtime)
 	
 	const float abm_interval = 1.0;
 	if(m_active_block_modifier_interval.step(dtime, abm_interval))
-	{
+	do{ // breakable
+		if(m_active_block_interval_overload_skip > 0){
+			ScopeProfiler sp(g_profiler, "SEnv: ABM overload skips");
+			m_active_block_interval_overload_skip--;
+			break;
+		}
 		ScopeProfiler sp(g_profiler, "SEnv: modify in blocks avg /1s", SPT_AVG);
 		TimeTaker timer("modify in active blocks");
 		
@@ -1116,8 +1141,9 @@ void ServerEnvironment::step(float dtime)
 			infostream<<"WARNING: active block modifiers took "
 					<<time_ms<<"ms (longer than "
 					<<max_time_ms<<"ms)"<<std::endl;
+			m_active_block_interval_overload_skip = (time_ms / max_time_ms) + 1;
 		}
-	}
+	}while(0);
 	
 	/*
 		Step script environment (run global on_step())
@@ -1223,7 +1249,7 @@ u16 getFreeServerActiveObjectId(
 u16 ServerEnvironment::addActiveObject(ServerActiveObject *object)
 {
 	assert(object);
-	u16 id = addActiveObjectRaw(object, true);
+	u16 id = addActiveObjectRaw(object, true, 0);
 	return id;
 }
 
@@ -1382,7 +1408,7 @@ ActiveObjectMessage ServerEnvironment::getActiveObjectMessage()
 */
 
 u16 ServerEnvironment::addActiveObjectRaw(ServerActiveObject *object,
-		bool set_changed)
+		bool set_changed, u32 dtime_s)
 {
 	assert(object);
 	if(object->getId() == 0){
@@ -1422,7 +1448,7 @@ u16 ServerEnvironment::addActiveObjectRaw(ServerActiveObject *object,
 	// Register reference in scripting api (must be done before post-init)
 	scriptapi_add_object_reference(m_lua, object);
 	// Post-initialize object
-	object->addedToEnvironment();
+	object->addedToEnvironment(dtime_s);
 	
 	// Add static data to block
 	if(object->isStaticAllowed())
@@ -1445,9 +1471,10 @@ u16 ServerEnvironment::addActiveObjectRaw(ServerActiveObject *object,
 						"addActiveObjectRaw");
 		}
 		else{
+			v3s16 p = floatToInt(objectpos, BS);
 			errorstream<<"ServerEnvironment::addActiveObjectRaw(): "
 					<<"could not find block for storing id="<<object->getId()
-					<<" statically"<<std::endl;
+					<<" statically (pos="<<PP(p)<<")"<<std::endl;
 		}
 	}
 	
@@ -1558,7 +1585,7 @@ static void print_hexdump(std::ostream &o, const std::string &data)
 /*
 	Convert stored objects from blocks near the players to active.
 */
-void ServerEnvironment::activateObjects(MapBlock *block)
+void ServerEnvironment::activateObjects(MapBlock *block, u32 dtime_s)
 {
 	if(block==NULL)
 		return;
@@ -1582,7 +1609,7 @@ void ServerEnvironment::activateObjects(MapBlock *block)
 				"large amount of objects");
 		return;
 	}
-	// A list for objects that couldn't be converted to static for some
+	// A list for objects that couldn't be converted to active for some
 	// reason. They will be stored back.
 	core::list<StaticObject> new_stored;
 	// Loop through stored static objects
@@ -1612,7 +1639,7 @@ void ServerEnvironment::activateObjects(MapBlock *block)
 				<<"activated static object pos="<<PP(s_obj.pos/BS)
 				<<" type="<<(int)s_obj.type<<std::endl;
 		// This will also add the object to the active static list
-		addActiveObjectRaw(obj, false);
+		addActiveObjectRaw(obj, false, dtime_s);
 	}
 	// Clear stored list
 	block->m_static_objects.m_stored.clear();
@@ -1736,7 +1763,12 @@ void ServerEnvironment::deactivateFarObjects(bool force_delete)
 			// Add to the block where the object is located in
 			v3s16 blockpos = getNodeBlockPos(floatToInt(objectpos, BS));
 			// Get or generate the block
-			MapBlock *block = m_map->emergeBlock(blockpos);
+			MapBlock *block = NULL;
+			try{
+				block = m_map->emergeBlock(blockpos);
+			} catch(InvalidPositionException &e){
+				// Handled via NULL pointer
+			}
 
 			if(block)
 			{
@@ -1773,9 +1805,10 @@ void ServerEnvironment::deactivateFarObjects(bool force_delete)
 			}
 			else{
 				if(!force_delete){
+					v3s16 p = floatToInt(objectpos, BS);
 					errorstream<<"ServerEnv: Could not find or generate "
 							<<"a block for storing id="<<obj->getId()
-							<<" statically"<<std::endl;
+							<<" statically (pos="<<PP(p)<<")"<<std::endl;
 					continue;
 				}
 			}
@@ -2014,19 +2047,32 @@ void ClientEnvironment::step(float dtime)
 			i != player_collisions.end(); i++)
 	{
 		CollisionInfo &info = *i;
-		if(info.t == COLLISION_FALL)
+		v3f speed_diff = info.new_speed - info.old_speed;;
+		// Handle only fall damage
+		// (because otherwise walking against something in fast_move kills you)
+		if(speed_diff.Y < 0 || info.old_speed.Y >= 0)
+			continue;
+		// Get rid of other components
+		speed_diff.X = 0;
+		speed_diff.Z = 0;
+		f32 pre_factor = 1; // 1 hp per node/s
+		f32 tolerance = BS*14; // 5 without damage
+		f32 post_factor = 1; // 1 hp per node/s
+		if(info.type == COLLISION_NODE)
 		{
-			//f32 tolerance = BS*10; // 2 without damage
-			//f32 tolerance = BS*12; // 3 without damage
-			f32 tolerance = BS*14; // 5 without damage
-			f32 factor = 1;
-			if(info.speed > tolerance)
-			{
-				f32 damage_f = (info.speed - tolerance)/BS*factor;
-				u16 damage = (u16)(damage_f+0.5);
-				if(damage != 0)
-					damageLocalPlayer(damage, true);
-			}
+			const ContentFeatures &f = m_gamedef->ndef()->
+					get(m_map->getNodeNoEx(info.node_p));
+			// Determine fall damage multiplier
+			int addp = itemgroup_get(f.groups, "fall_damage_add_percent");
+			pre_factor = 1.0 + (float)addp/100.0;
+		}
+		float speed = pre_factor * speed_diff.getLength();
+		if(speed > tolerance)
+		{
+			f32 damage_f = (speed - tolerance)/BS * post_factor;
+			u16 damage = (u16)(damage_f+0.5);
+			if(damage != 0)
+				damageLocalPlayer(damage, true);
 		}
 	}
 	
@@ -2096,6 +2142,7 @@ void ClientEnvironment::step(float dtime)
 		Step active objects and update lighting of them
 	*/
 	
+	bool update_lighting = m_active_object_light_update_interval.step(dtime, 0.21);
 	for(core::map<u16, ClientActiveObject*>::Iterator
 			i = m_active_objects.getIterator();
 			i.atEnd()==false; i++)
@@ -2104,7 +2151,7 @@ void ClientEnvironment::step(float dtime)
 		// Step object
 		obj->step(dtime, this);
 
-		if(m_active_object_light_update_interval.step(dtime, 0.21))
+		if(update_lighting)
 		{
 			// Update lighting
 			u8 light = 0;

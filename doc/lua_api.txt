@@ -453,6 +453,9 @@ Special groups
   - 2: node is removed without tool wear after 0.5 seconds or so
        (rail, sign)
   - 3: node is removed without tool wear immediately (torch)
+- disable_jump: Player (and possibly other things) cannot jump from node
+- fall_damage_add_percent: damage speed = speed * (1 + value/100)
+- bouncy: value is bounce speed in percent
 
 Known damage and digging time defining groups
 ----------------------------------------------
@@ -888,6 +891,20 @@ minetest.get_craft_recipe(output) -> input
 ^ input.items = for example { stack 1, stack 2, stack 3, stack 4,
                               stack 5, stack 6, stack 7, stack 8, stack 9 }
 ^ input.items = nil if no recipe found
+minetest.handle_node_drops(pos, drops, digger)
+^ drops: list of itemstrings
+^ Handles drops from nodes after digging: Default action is to put them into
+  digger's inventory
+^ Can be overridden to get different functionality (eg. dropping items on
+  ground)
+
+Rollbacks:
+minetest.rollback_get_last_node_actor(p, range, seconds) -> actor, p, seconds
+^ Find who has done something to a node, or near a node
+^ actor: "player:<name>", also "liquid".
+minetest.rollback_revert_actions_by(actor, seconds) -> bool, log messages
+^ Revert latest actions of someone
+^ actor: "player:<name>", also "liquid".
 
 Defaults for the on_* item definition functions:
 (These return the leftover itemstack)
@@ -919,6 +936,16 @@ Timing:
 minetest.after(time, func, param)
 ^ Call function after time seconds
 ^ param is optional; to pass multiple parameters, pass a table.
+
+Server:
+minetest.request_shutdown() -> request for server shutdown
+minetest.get_server_status() -> server status string
+
+Bans:
+minetest.get_ban_list() -> ban list (same as minetest.get_ban_description(""))
+minetest.get_ban_description(ip_or_name) -> ban description (string)
+minetest.ban_player(name) -> ban a player
+minetest.unban_player_or_ip(name) -> unban player or IP address
 
 Random:
 minetest.get_connected_players() -> list of ObjectRefs
@@ -1009,6 +1036,8 @@ methods:
   ^ nodenames: eg. {"ignore", "group:tree"} or "default:dirt"
 - get_perlin(seeddiff, octaves, persistence, scale)
   ^ Return world-specific perlin noise (int(worldseed)+seeddiff)
+- clear_objects()
+  ^ clear all objects in the environments 
 Deprecated:
 - add_rat(pos): Add C++ rat object (no-op)
 - add_firefly(pos): Add C++ firefly object (no-op)
@@ -1058,6 +1087,7 @@ methods:
 - punch(puncher, time_from_last_punch, tool_capabilities, direction)
   ^ puncher = an another ObjectRef,
   ^ time_from_last_punch = time since last punch action of the puncher
+  ^ direction: can be nil
 - right_click(clicker); clicker = an another ObjectRef
 - get_hp(): returns number of hitpoints (2 * number of hearts)
 - set_hp(hp): set number of hitpoints (2 * number of hearts)
@@ -1098,6 +1128,8 @@ methods:
 - is_empty(listname): return true if list is empty
 - get_size(listname): get size of a list
 - set_size(listname, size): set size of a list
+- get_width(listname): get width of a list
+- set_width(listname, width): set width of list; currently used for crafting
 - get_stack(listname, i): get a copy of stack index i in list
 - set_stack(listname, i, stack): copy stack to index i in list
 - get_list(listname): return full list
@@ -1205,7 +1237,7 @@ Entity definition (register_entity)
     
     initial_properties = <initial object properties>,
 
-    on_activate = function(self, staticdata),
+    on_activate = function(self, staticdata, dtime_s),
     on_step = function(self, dtime),
     on_punch = function(self, hitter),
     on_rightclick = function(self, clicker),
@@ -1389,6 +1421,11 @@ Node definition (register_node)
 	on_metadata_inventory_take = func(pos, listname, index, stack, player),
 	^ Called after the actual action has happened, according to what was allowed.
 	^ No return value
+    
+	on_blast = func(pos, intensity),
+	^ intensity: 1.0 = mid range of regular TNT
+	^ If defined, called when an explosion touches the node, instead of
+	  removing the node
 }
 
 Recipe for register_craft: (shaped)
